@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Socialsave - Video Downloader</title>
+    <title>SSDownload - Universal Video Downloader</title>
     <style>
         * {
             margin: 0;
@@ -364,7 +364,7 @@
 <body>
     <header class="header">
         <nav class="nav">
-            <a href="#" class="logo">SaveTT.cc</a>
+            <a href="#" class="logo">SSDownload</a>
             <div class="nav-links">
                 <a href="#home">Home</a>
                 <a href="#facebook">Facebook Video Downloader</a>
@@ -381,7 +381,7 @@
             <div class="download-form">
                 <input type="text" class="url-input" placeholder="Paste a video URL here..." id="videoUrl">
                 <button class="paste-btn" onclick="pasteFromClipboard()">📋 Paste</button>
-                <button class="search-btn" onclick="processVideo()">Search</button>
+                <button class="search-btn" onclick="processVideo()">Download</button>
             </div>
         </section>
 
@@ -433,7 +433,7 @@
                     <div class="step">
                         <div class="step-number">2</div>
                         <h3>Paste the Video URL</h3>
-                        <p>Paste the video URL to the input box above and click the 'Search' button to process.</p>
+                        <p>Paste the video URL to the input box above and click the 'Download' button to process.</p>
                     </div>
                     <div class="step">
                         <div class="step-number">3</div>
@@ -502,58 +502,85 @@
             hideError();
             hideResult();
 
-            try {
-                // Use your live Replit backend URL
-                const response = await fetch('https://b652e939-edea-43c7-b7e3-4ca94fc3c835-00-3dmp6w8birkc1.janeway.replit.dev/api/download', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ url })
-                });
+            // Try multiple backend URLs in case one is down
+            const backendUrls = [
+                'https://b652e939-edea-43c7-b7e3-4ca94fc3c835-00-3dmp6w8birkc1.janeway.replit.dev/api/download',
+                'https://video-downloader-api.onrender.com/api/download', // Backup URL
+                'https://api.ssdownload.com/download' // Alternative backup
+            ];
 
-                const data = await response.json();
+            let response = null;
+            let data = null;
+            let lastError = null;
 
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to process video');
-                }
-
-                if (data.success) {
-                    // Update video information
-                    document.getElementById('videoTitle').textContent = data.title;
-                    document.getElementById('videoAuthor').textContent = `@${data.author}`;
-                    document.getElementById('videoDuration').textContent = `Duration: ${data.duration}`;
+            // Try each backend URL until one works
+            for (const backendUrl of backendUrls) {
+                try {
+                    console.log(`Trying backend: ${backendUrl}`);
                     
-                    // Add platform badge
-                    const platformBadge = `<span class="platform-badge">${data.platform.toUpperCase()}</span>`;
-                    document.getElementById('videoTitle').innerHTML = data.title + ' ' + platformBadge;
+                    response = await fetch(backendUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ url }),
+                        timeout: 10000 // 10 second timeout
+                    });
 
-                    // Update download buttons with real functionality
-                    const downloadOptions = document.querySelector('.download-options');
-                    downloadOptions.innerHTML = `
-                        <button class="download-btn" onclick="downloadVideo('${data.downloadUrl}', '${data.title}', 'mp4')">
-                            📱 Download MP4 (${data.quality || 'Standard'})
-                        </button>
-                        <button class="download-btn" onclick="copyDownloadLink('${data.downloadUrl}')">
-                            📋 Copy Link
-                        </button>
-                        <div class="video-info-extra">
-                            <small>File size: ${data.filesize || 'Unknown'} • Platform: ${data.platform}</small>
-                        </div>
-                    `;
+                    data = await response.json();
 
-                    // Show result section
-                    showResult();
-                } else {
-                    throw new Error('No download URL received');
+                    if (response.ok && data.success) {
+                        break; // Success! Exit the loop
+                    } else {
+                        throw new Error(data.error || 'Backend returned error');
+                    }
+                    
+                } catch (error) {
+                    console.error(`Backend ${backendUrl} failed:`, error.message);
+                    lastError = error;
+                    continue; // Try next backend
                 }
+            }
+
+            try {
+                // If we get here and don't have successful data, all backends failed
+                if (!data || !data.success) {
+                    throw new Error(lastError?.message || 'All backend services are currently unavailable. Please try again later.');
+                }
+
+                // Update video information
+                document.getElementById('videoTitle').textContent = data.title;
+                document.getElementById('videoAuthor').textContent = `@${data.author}`;
+                document.getElementById('videoDuration').textContent = `Duration: ${data.duration}`;
+                
+                // Add platform badge
+                const platformBadge = `<span class="platform-badge">${data.platform.toUpperCase()}</span>`;
+                document.getElementById('videoTitle').innerHTML = data.title + ' ' + platformBadge;
+
+                // Update download buttons with real functionality
+                const downloadOptions = document.querySelector('.download-options');
+                downloadOptions.innerHTML = `
+                    <button class="download-btn" onclick="downloadVideo('${data.downloadUrl}', '${data.title}', 'mp4')">
+                        📱 Download MP4 (${data.quality || 'Standard'})
+                    </button>
+                    <button class="download-btn" onclick="copyDownloadLink('${data.downloadUrl}')">
+                        📋 Copy Link
+                    </button>
+                    <div class="video-info-extra">
+                        <small>File size: ${data.filesize || 'Unknown'} • Platform: ${data.platform}</small>
+                    </div>
+                `;
+
+                // Show result section
+                showResult();
+                showSuccess('Video processed successfully! Click download to save.');
 
             } catch (error) {
                 console.error('Error processing video:', error);
                 showError(`Error: ${error.message}`);
             } finally {
                 // Reset button
-                searchBtn.textContent = originalText;
+                searchBtn.textContent = 'Download';
                 searchBtn.disabled = false;
             }
         }
