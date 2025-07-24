@@ -437,7 +437,7 @@
   searchBtn.disabled = true;
 
   try {
-    const res = await fetch('/api/download', {
+    const res = await fetch('https://b652e939-edea-43c7-b7e3-4ca94fc3c835-00-3dmp6w8birkc1.janeway.replit.dev/api/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url })
