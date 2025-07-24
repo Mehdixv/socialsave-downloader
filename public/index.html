@@ -284,6 +284,60 @@
             transform: translateY(-2px);
         }
 
+        /* Notification styles */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            z-index: 1000;
+            max-width: 400px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            animation: slideIn 0.3s ease;
+        }
+
+        .notification.error {
+            background: linear-gradient(135deg, #e74c3c, #c0392b);
+        }
+
+        .notification.success {
+            background: linear-gradient(135deg, #27ae60, #229954);
+        }
+
+        .platform-badge {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-left: 10px;
+            font-weight: 500;
+        }
+
+        .video-info-extra {
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .video-info-extra small {
+            color: #666;
+            font-size: 12px;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
         @media (max-width: 768px) {
             .hero h1 {
                 font-size: 32px;
@@ -296,6 +350,13 @@
             
             .nav-links {
                 display: none;
+            }
+
+            .notification {
+                top: 10px;
+                right: 10px;
+                left: 10px;
+                max-width: none;
             }
         }
     </style>
@@ -426,44 +487,76 @@
 -->
 
         async function processVideo() {
-  const url = document.getElementById('videoUrl').value.trim();
-  if (!url || !isValidUrl(url)) {
-    alert('Please enter a valid video URL');
-    return;
-  }
+            const url = document.getElementById('videoUrl').value.trim();
+            if (!url || !isValidUrl(url)) {
+                showError('Please enter a valid video URL');
+                return;
+            }
 
-  const searchBtn = document.querySelector('.search-btn');
-  searchBtn.textContent = 'Processing...';
-  searchBtn.disabled = true;
+            const searchBtn = document.querySelector('.search-btn');
+            const originalText = searchBtn.textContent;
+            
+            // Show loading state
+            searchBtn.textContent = 'Processing...';
+            searchBtn.disabled = true;
+            hideError();
+            hideResult();
 
-  try {
-    const res = await fetch('https://b652e939-edea-43c7-b7e3-4ca94fc3c835-00-3dmp6w8birkc1.janeway.replit.dev/api/download', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url })
-    });
+            try {
+                // Use your live Replit backend URL
+                const response = await fetch('https://b652e939-edea-43c7-b7e3-4ca94fc3c835-00-3dmp6w8birkc1.janeway.replit.dev/api/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url })
+                });
 
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
+                const data = await response.json();
 
-    document.getElementById('videoTitle').textContent = data.title;
-    document.getElementById('videoAuthor').textContent = `@${data.author}`;
-    document.getElementById('videoDuration').textContent = `Duration: ${data.duration}s`;
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to process video');
+                }
 
-    document.querySelector('.download-options').innerHTML = `
-      <button class="download-btn" onclick="window.open('${data.link}', '_blank')">📱 Download MP4</button>
-    `;
+                if (data.success) {
+                    // Update video information
+                    document.getElementById('videoTitle').textContent = data.title;
+                    document.getElementById('videoAuthor').textContent = `@${data.author}`;
+                    document.getElementById('videoDuration').textContent = `Duration: ${data.duration}`;
+                    
+                    // Add platform badge
+                    const platformBadge = `<span class="platform-badge">${data.platform.toUpperCase()}</span>`;
+                    document.getElementById('videoTitle').innerHTML = data.title + ' ' + platformBadge;
 
-    document.getElementById('resultSection').style.display = 'block';
-    document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+                    // Update download buttons with real functionality
+                    const downloadOptions = document.querySelector('.download-options');
+                    downloadOptions.innerHTML = `
+                        <button class="download-btn" onclick="downloadVideo('${data.downloadUrl}', '${data.title}', 'mp4')">
+                            📱 Download MP4 (${data.quality || 'Standard'})
+                        </button>
+                        <button class="download-btn" onclick="copyDownloadLink('${data.downloadUrl}')">
+                            📋 Copy Link
+                        </button>
+                        <div class="video-info-extra">
+                            <small>File size: ${data.filesize || 'Unknown'} • Platform: ${data.platform}</small>
+                        </div>
+                    `;
 
-  } catch (err) {
-    alert('Error: ' + err.message);
-  } finally {
-    searchBtn.textContent = 'Search';
-    searchBtn.disabled = false;
-  }
-}
+                    // Show result section
+                    showResult();
+                } else {
+                    throw new Error('No download URL received');
+                }
+
+            } catch (error) {
+                console.error('Error processing video:', error);
+                showError(`Error: ${error.message}`);
+            } finally {
+                // Reset button
+                searchBtn.textContent = originalText;
+                searchBtn.disabled = false;
+            }
+        }
 
         function isValidUrl(string) {
             try {
@@ -474,28 +567,99 @@
             }
         }
 
-        function showVideoResult(url) {
-            // Extract platform name from URL
-            let platform = 'Unknown Platform';
-            if (url.includes('tiktok.com')) platform = 'TikTok';
-            else if (url.includes('instagram.com')) platform = 'Instagram';
-            else if (url.includes('facebook.com')) platform = 'Facebook';
-            else if (url.includes('twitter.com') || url.includes('x.com')) platform = 'Twitter';
-            else if (url.includes('youtube.com')) platform = 'YouTube';
+        // New function to actually download videos
+        async function downloadVideo(downloadUrl, title, format) {
+            if (!downloadUrl) {
+                showError('No download URL available');
+                return;
+            }
 
-            // Update result section
-            document.getElementById('videoTitle').textContent = `${platform} Video`;
-            document.getElementById('videoAuthor').textContent = '@sample_user';
-            document.getElementById('videoDuration').textContent = 'Duration: 0:45';
-            
-            // Show result section
+            try {
+                // Create a temporary link element and trigger download
+                const link = document.createElement('a');
+                link.href = downloadUrl;
+                link.download = `${title.replace(/[^a-zA-Z0-9]/g, '_')}.${format}`;
+                link.target = '_blank';
+                
+                // Append to body, click, and remove
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                showSuccess('Download started! Check your downloads folder.');
+                
+            } catch (error) {
+                console.error('Download error:', error);
+                // Fallback: open in new tab
+                window.open(downloadUrl, '_blank');
+                showSuccess('Download link opened in new tab!');
+            }
+        }
+
+        // Copy download link to clipboard
+        async function copyDownloadLink(url) {
+            try {
+                await navigator.clipboard.writeText(url);
+                showSuccess('Download link copied to clipboard!');
+            } catch (err) {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = url;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showSuccess('Download link copied to clipboard!');
+            }
+        }
+
+        // UI Helper functions
+        function showResult() {
             document.getElementById('resultSection').style.display = 'block';
             document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
         }
 
-        function downloadVideo(format) {
-            // In a real implementation, this would trigger the actual download
-            alert(`This is a demo! In a real app, this would download the video in ${format.toUpperCase()} format.\n\nTo make this functional, you'd need to integrate with video downloading APIs or services.`);
+        function hideResult() {
+            document.getElementById('resultSection').style.display = 'none';
+        }
+
+        function showError(message) {
+            hideNotification();
+            const notification = document.createElement('div');
+            notification.className = 'notification error';
+            notification.innerHTML = `
+                <span>❌ ${message}</span>
+                <button onclick="hideNotification()" style="background: none; border: none; color: white; font-size: 18px; cursor: pointer; float: right;">&times;</button>
+            `;
+            document.body.appendChild(notification);
+            
+            // Auto hide after 5 seconds
+            setTimeout(hideNotification, 5000);
+        }
+
+        function showSuccess(message) {
+            hideNotification();
+            const notification = document.createElement('div');
+            notification.className = 'notification success';
+            notification.innerHTML = `
+                <span>✅ ${message}</span>
+                <button onclick="hideNotification()" style="background: none; border: none; color: white; font-size: 18px; cursor: pointer; float: right;">&times;</button>
+            `;
+            document.body.appendChild(notification);
+            
+            // Auto hide after 3 seconds
+            setTimeout(hideNotification, 3000);
+        }
+
+        function hideError() {
+            hideNotification();
+        }
+
+        function hideNotification() {
+            const notification = document.querySelector('.notification');
+            if (notification) {
+                notification.remove();
+            }
         }
 
         // Add some interactive effects
@@ -515,6 +679,13 @@
             document.getElementById('videoUrl').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
                     processVideo();
+                }
+            });
+
+            // Clear input when clicking on it
+            document.getElementById('videoUrl').addEventListener('focus', function() {
+                if (this.value.includes('Paste a video URL here')) {
+                    this.value = '';
                 }
             });
         });
