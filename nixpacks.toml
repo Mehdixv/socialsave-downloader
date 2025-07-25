@@ -1,0 +1,8 @@
+{
+  "nixpkgs": {
+    "python3": "3.11",
+    "python3Packages.yt-dlp": "latest",
+    "nodejs": "18",
+    "ffmpeg": "latest"
+  }
+}
