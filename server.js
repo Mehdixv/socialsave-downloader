@@ -1,14 +1,14 @@
 const express = require('express');
-const { YtDlp } = require('ytdlp-nodejs');
 const path = require('path');
 const fs = require('fs');
+const { exec } = require('child_process');
+const util = require('util');
 const app = express();
 
-// Initialize yt-dlp
-const ytdlp = new YtDlp();
+const execPromise = util.promisify(exec);
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Enable CORS for all requests
@@ -46,7 +46,7 @@ function detectPlatform(url) {
   return 'unknown';
 }
 
-// Universal download endpoint - works with any supported platform
+// Fast download endpoint using yt-dlp directly
 app.post('/api/download', async (req, res) => {
   const { url } = req.body;
   
@@ -55,45 +55,118 @@ app.post('/api/download', async (req, res) => {
   }
 
   const platform = detectPlatform(url);
+  console.log(`Processing ${platform} video: ${url}`);
   
   try {
-    console.log(`Processing ${platform} video: ${url}`);
+    // Use yt-dlp command directly for better performance
+    const command = `yt-dlp --print-json --no-download "${url}"`;
     
-    // Get video information
-    const info = await ytdlp.getInfo(url);
+    const { stdout, stderr } = await execPromise(command, { timeout: 15000 });
     
-    // Find the best quality MP4 format
-    const formats = info.formats || [];
-    const mp4Format = formats
-      .filter(f => f.ext === 'mp4' && f.url)
-      .sort((a, b) => (b.filesize || 0) - (a.filesize || 0))[0];
+    if (stderr && !stdout) {
+      throw new Error('Failed to fetch video information');
+    }
+
+    const videoInfo = JSON.parse(stdout.trim());
     
-    if (!mp4Format) {
-      return res.status(404).json({ error: 'No downloadable MP4 format found' });
+    // Get the best quality download URL
+    const formats = videoInfo.formats || [];
+    const bestFormat = formats
+      .filter(f => f.vcodec !== 'none' && f.acodec !== 'none' && f.url)
+      .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+
+    if (!bestFormat) {
+      return res.status(404).json({ error: 'No downloadable format found' });
     }
 
     res.json({
       success: true,
       platform: platform,
-      title: info.title || 'Video',
-      author: info.uploader || info.channel || 'Unknown',
-      duration: formatDuration(info.duration),
-      thumbnail: info.thumbnail || '',
-      downloadUrl: mp4Format.url,
-      filesize: formatFileSize(mp4Format.filesize),
-      quality: mp4Format.height ? `${mp4Format.height}p` : 'Standard'
+      title: videoInfo.title || 'Video',
+      author: videoInfo.uploader || videoInfo.channel || 'Unknown',
+      duration: formatDuration(videoInfo.duration),
+      thumbnail: videoInfo.thumbnail || '',
+      downloadUrl: bestFormat.url,
+      filesize: formatFileSize(bestFormat.filesize),
+      quality: bestFormat.height ? `${bestFormat.height}p` : 'Standard',
+      directDownload: true
     });
     
   } catch (error) {
     console.error('Download error:', error.message);
-    res.status(500).json({ 
-      error: `Failed to process ${platform} video. Please check the URL and try again.`,
-      details: error.message 
-    });
+    
+    // Fallback: Use a more reliable yt-dlp service
+    try {
+      const fallbackResponse = await fallbackDownload(url, platform);
+      res.json(fallbackResponse);
+    } catch (fallbackError) {
+      res.status(500).json({ 
+        error: `Failed to process ${platform} video. The video might be private or unavailable.`,
+        details: error.message 
+      });
+    }
   }
 });
 
-// Platform-specific endpoints for future expansion
+// Fallback download method
+async function fallbackDownload(url, platform) {
+  // Try to get just basic info and generate a download link
+  const command = `yt-dlp --get-url --get-title --get-duration "${url}"`;
+  
+  try {
+    const { stdout } = await execPromise(command, { timeout: 10000 });
+    const lines = stdout.trim().split('\n');
+    
+    return {
+      success: true,
+      platform: platform,
+      title: lines[1] || 'Video',
+      author: 'Unknown',
+      duration: lines[2] || 'Unknown',
+      thumbnail: '',
+      downloadUrl: lines[0] || url,
+      filesize: 'Unknown',
+      quality: 'Standard',
+      directDownload: true
+    };
+  } catch (error) {
+    throw new Error('Video unavailable or private');
+  }
+}
+
+// Direct download endpoint for faster downloads
+app.get('/api/direct-download', async (req, res) => {
+  const { url } = req.query;
+  
+  if (!url) {
+    return res.status(400).json({ error: 'URL parameter required' });
+  }
+
+  try {
+    // Get direct download URL
+    const command = `yt-dlp --get-url "${url}"`;
+    const { stdout } = await execPromise(command, { timeout: 10000 });
+    
+    const downloadUrl = stdout.trim();
+    
+    // Redirect to the actual video file
+    res.redirect(downloadUrl);
+    
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get download URL' });
+  }
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'SocialSave Download Server is running!', 
+    timestamp: new Date().toISOString(),
+    platforms: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Twitter', 'LinkedIn']
+  });
+});
+
+// Platform-specific endpoints
 app.post('/api/youtube', async (req, res) => {
   await handlePlatformDownload(req, res, 'youtube');
 });
@@ -104,14 +177,6 @@ app.post('/api/instagram', async (req, res) => {
 
 app.post('/api/tiktok', async (req, res) => {
   await handlePlatformDownload(req, res, 'tiktok');
-});
-
-app.post('/api/facebook', async (req, res) => {
-  await handlePlatformDownload(req, res, 'facebook');
-});
-
-app.post('/api/twitter', async (req, res) => {
-  await handlePlatformDownload(req, res, 'twitter');
 });
 
 // Generic platform handler
@@ -132,7 +197,7 @@ async function handlePlatformDownload(req, res, expectedPlatform) {
 
   // Reuse the main download logic
   req.body = { url };
-  return app._router.handle({ ...req, method: 'POST', url: '/api/download' }, res);
+  return await app._router.handle({ ...req, method: 'POST', url: '/api/download' }, res);
 }
 
 // Helper functions
@@ -160,14 +225,10 @@ function formatFileSize(bytes) {
   return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
 }
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'Server is running!', timestamp: new Date().toISOString() });
-});
-
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Universal Video Downloader Server running on port ${PORT}`);
+  console.log(`🚀 SocialSave Download Server running on port ${PORT}`);
   console.log(`📱 Supported platforms: YouTube, Instagram, TikTok, Facebook, Twitter, LinkedIn, Pinterest`);
+  console.log(`🌐 Access at: http://localhost:${PORT}`);
 });
